@@ -1,0 +1,46 @@
+{
+    "templates": [
+        {
+            "name": "John Smith",
+            "email": "john.smith@techcorp.com",
+            "company": "TechCorp Solutions",
+            "position": "Senior Software Engineer",
+            "department": "Engineering",
+            "recent_activities": [
+                "Completed AWS certification",
+                "Attended DevOps conference",
+                "Started new project implementation"
+            ],
+            "interests": ["cloud computing", "devops", "software architecture"],
+            "location": "San Francisco, CA"
+        },
+        {
+            "name": "Sarah Johnson",
+            "email": "sarah.j@financecorp.com",
+            "company": "FinanceCorp International",
+            "position": "Financial Analyst",
+            "department": "Investment Banking",
+            "recent_activities": [
+                "Completed CFA Level II",
+                "Led quarterly financial review",
+                "Implemented new risk assessment model"
+            ],
+            "interests": ["investment strategies", "market analysis", "risk management"],
+            "location": "New York, NY"
+        },
+        {
+            "name": "Michael Chen",
+            "email": "m.chen@healthtech.com",
+            "company": "HealthTech Innovations",
+            "position": "Research Scientist",
+            "department": "Medical Research",
+            "recent_activities": [
+                "Published paper in Nature Medicine",
+                "Developed new diagnostic algorithm",
+                "Presented at Medical AI Conference"
+            ],
+            "interests": ["medical AI", "biotechnology", "clinical research"],
+            "location": "Boston, MA"
+        }
+    ]
+} 
