@@ -1,9 +1,6 @@
 # SPEAR: System for Personalized Email Adversarial Refinement
 
-📄 **S&P 2026 Submission**  
 **Title:** *Emerging Threats of LLM-Powered Phishing: Personalized and Adversarial Email Attacks via Multi-Agent Systems*  
-**Status:** Under Review (Double-Blind Submission)  
-**Conference:** IEEE Symposium on Security and Privacy (S&P) Symposium 2026  
 
 ---
 
