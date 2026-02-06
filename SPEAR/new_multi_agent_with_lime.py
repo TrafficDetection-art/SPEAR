@@ -5,6 +5,7 @@ import os
 import re
 from datetime import datetime
 from openai import OpenAI
+import httpx
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import inspect
 import numpy as np
@@ -24,9 +25,47 @@ from lime_analyzer import LimeAnalyzer, get_all_model_configs
 # ========================== 配置加载 ==========================
 
 def load_config(config_path="./config.json"):
-    """加载配置文件"""
+    """
+    加载配置文件，支持攻防分离的模型配置
+    
+    配置文件格式示例：
+    {
+        "attack_model": {
+            "api_key": "...",
+            "api_base_url": "...",
+            "model": "gpt-4o"
+        },
+        "defense_model": {
+            "api_key": "...",
+            "api_base_url": "...",
+            "model": "gpt-4o-mini"
+        }
+    }
+    
+    或者保持兼容旧格式：
+    {
+        "api_key": "...",
+        "api_base_url": "...",
+        "model": "gpt-4o"
+    }
+    """
     with open(config_path, "r") as config_file:
-        return json.load(config_file)
+        config_data = json.load(config_file)
+    
+    # 检查是否使用新格式（攻防分离）
+    if "attack_model" in config_data and "defense_model" in config_data:
+        print("检测到攻防分离配置模式")
+        print(f"  攻击方模型: {config_data['attack_model'].get('model', 'unknown')}")
+        print(f"  防御方模型: {config_data['defense_model'].get('model', 'unknown')}")
+        return config_data
+    else:
+        # 兼容旧格式，攻防使用相同配置
+        print("使用统一配置模式（攻防共用同一模型）")
+        print(f"  模型: {config_data.get('model', 'unknown')}")
+        return {
+            "attack_model": config_data,
+            "defense_model": config_data
+        }
 
 
 config = load_config()
@@ -165,7 +204,11 @@ def estimate_cost(prompt_tokens=0, completion_tokens=0, model_name=None):
     }
     
     if not model_name:
-        model_name = config.get("model", "default")
+        # 尝试从配置中获取模型名称（兼容新旧格式）
+        if "attack_model" in config:
+            model_name = config["attack_model"].get("model", "default")
+        else:
+            model_name = "default"
     
     # 默认定价（如果模型未找到）
     default_pricing = {
@@ -423,8 +466,15 @@ def create_output_directory():
     # 基础输出目录
     output_base_dir = "outputs"
     
-    # 获取模型名称并添加agent-前缀
-    model_name = f"agent-{config['model']}"
+    # 获取攻防模型名称
+    attack_model = config['attack_model']['model']
+    defense_model = config['defense_model']['model']
+    
+    # 如果攻防模型相同，使用单一模型名称；否则显示攻防对比
+    if attack_model == defense_model:
+        model_name = f"agent-{attack_model}"
+    else:
+        model_name = f"agent-attack_{attack_model}_vs_defense_{defense_model}"
     
     # 创建时间戳，精确到秒
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -440,18 +490,78 @@ def create_output_directory():
 
 # ========================== OpenAI 客户端管理 ==========================
 
-def create_client():
-    """创建 OpenAI 客户端实例"""
-    return OpenAI(api_key=config["api_key"], base_url=config["api_base_url"].rstrip('/'))
+def create_client(role="attack"):
+    """
+    创建 OpenAI 客户端实例（支持本地模型和SSL配置）
+    
+    Args:
+        role: "attack" 表示攻击方客户端，"defense" 表示防御方客户端
+    
+    Returns:
+        OpenAI 客户端实例或本地模型适配器
+    """
+    if role not in ["attack", "defense"]:
+        raise ValueError(f"Invalid role: {role}. Must be 'attack' or 'defense'")
+    
+    model_config = config[f"{role}_model"]
+    base_url = model_config["api_base_url"].rstrip('/')
+    
+    # 检测是否为本地Qwen模型（通过URL中的/api/infer判断）
+    is_local_qwen = "localhost" in base_url or "127.0.0.1" in base_url
+    
+    if is_local_qwen and "/api/infer" not in base_url:
+        # 如果是本地模型但URL格式特殊，使用Qwen适配器
+        print(f"检测到本地Qwen模型，使用适配器")
+        try:
+            from qwen_api_adapter import QwenClient
+            client = QwenClient(
+                api_key=model_config["api_key"],
+                base_url=base_url
+            )
+            print(f"创建{role}客户端(Qwen适配器): 模型={model_config.get('model', 'unknown')}")
+            return client
+        except ImportError:
+            print("警告: 无法导入Qwen适配器，尝试使用标准OpenAI客户端")
+    
+    # 检查是否需要禁用SSL验证
+    disable_ssl = model_config.get("disable_ssl_verify", False)
+    
+    # 使用标准OpenAI客户端（适用于OpenAI兼容的API）
+    if disable_ssl:
+        print(f"⚠️  警告: 为{role}客户端禁用SSL验证（不推荐用于生产环境）")
+        # 创建禁用SSL验证的HTTP客户端
+        http_client = httpx.Client(verify=False)
+        client = OpenAI(
+            api_key=model_config["api_key"], 
+            base_url=base_url,
+            http_client=http_client
+        )
+    else:
+        client = OpenAI(
+            api_key=model_config["api_key"], 
+            base_url=base_url
+        )
+    
+    print(f"创建{role}客户端: 模型={model_config.get('model', 'unknown')}")
+    return client
 
 
 # ========================== LLM 交互 ==========================
 
-def get_LLM_response_vllm(client, prompt, need_sample=False, function_name="unknown"):
-    """发送请求到 OpenAI LLM，并处理异常情况"""
+def get_LLM_response_vllm(client, prompt, need_sample=False, function_name="unknown", role="attack"):
+    """
+    发送请求到 OpenAI LLM，并处理异常情况
+    
+    Args:
+        client: OpenAI 客户端
+        prompt: 提示词
+        need_sample: 是否需要采样
+        function_name: 函数名称（用于统计）
+        role: "attack" 或 "defense"，用于确定使用哪个模型配置
+    """
     sample_num = 3 if need_sample else 1
     conversation = [{"role": "user", "content": prompt}]
-    model = config["model"]
+    model = config[f"{role}_model"]["model"]
     max_tokens_for_completion = 2048  # 预留 Token 限制，避免超限
 
     max_retries = 5
@@ -459,14 +569,29 @@ def get_LLM_response_vllm(client, prompt, need_sample=False, function_name="unkn
 
     for attempt in range(max_retries):
         try:
-            chat_response = client.chat.completions.create(
-                model=model,
-                messages=conversation,
-                n=sample_num,
-                max_tokens=max_tokens_for_completion,
-                temperature=1.0,
-                top_p=0.95
-            )
+            # 检查是否使用最小参数集（用于不支持所有参数的模型）
+            use_minimal_params = config[f"{role}_model"].get("use_minimal_params", False)
+            
+            # 构建API调用参数
+            api_params = {
+                "model": model,
+                "messages": conversation,
+                "max_tokens": max_tokens_for_completion,
+            }
+            
+            # 如果不是最小参数模式，添加额外参数
+            if not use_minimal_params:
+                api_params["n"] = sample_num
+                api_params["temperature"] = 1.0
+                api_params["top_p"] = 0.95
+            else:
+                # 最小参数模式：只添加必要参数
+                if sample_num > 1:
+                    api_params["n"] = sample_num
+                # 某些模型可能支持temperature但不支持top_p
+                api_params["temperature"] = 1.0
+            
+            chat_response = client.chat.completions.create(**api_params)
 
             # 记录token使用量
             if hasattr(chat_response, 'usage') and chat_response.usage:
@@ -540,6 +665,55 @@ def evaluate_metrics(y_true, y_pred):
         "Precision": precision_score(y_true, y_pred_filtered, average='binary', pos_label=1, zero_division=0),
         "Recall": recall_score(y_true, y_pred_filtered, average='binary', pos_label=1, zero_division=0),
         "F1-score": f1_score(y_true, y_pred_filtered, average='binary', pos_label=1, zero_division=0)
+    }
+
+def calculate_asr(y_true, y_pred):
+    """
+    计算ASR (Attack Success Rate) - 攻击成功率
+    ASR = 成功绕过检测的恶意样本数 / 总恶意样本数
+    也就是恶意样本的漏报率 (False Negative Rate)
+    
+    在钓鱼邮件场景中：
+    - 真实标签为1（恶意钓鱼邮件）
+    - 模型预测为0（被误判为正常邮件）
+    - 表示攻击成功绕过了检测
+    
+    Args:
+        y_true: 真实标签列表 (1=恶意, 0=正常)
+        y_pred: 预测标签列表 (1=检测为恶意, 0=检测为正常)
+    
+    Returns:
+        dict: 包含ASR及相关统计信息
+    """
+    # 过滤掉无效预测（值为2的情况），将其视为正常邮件（0）
+    y_pred_filtered = [0 if pred == 2 else pred for pred in y_pred]
+    
+    # 统计恶意样本总数
+    total_malicious = sum(1 for label in y_true if label == 1)
+    
+    # 如果没有恶意样本，返回空结果
+    if total_malicious == 0:
+        return {
+            "ASR": 0.0,
+            "successful_evasions": 0,
+            "total_malicious": 0,
+            "evasion_rate_percent": 0.0,
+            "note": "No malicious samples in dataset"
+        }
+    
+    # 统计成功绕过检测的恶意样本数量
+    # 即：真实标签为1（恶意），但预测为0（正常）的样本数
+    successful_evasions = sum(1 for true_label, pred_label in zip(y_true, y_pred_filtered) 
+                             if true_label == 1 and pred_label == 0)
+    
+    # 计算ASR
+    asr = successful_evasions / total_malicious
+    
+    return {
+        "ASR": asr,
+        "successful_evasions": successful_evasions,
+        "total_malicious": total_malicious,
+        "evasion_rate_percent": asr * 100
     }
 
 # ========================== 文本预处理工具函数 ==========================
@@ -713,9 +887,9 @@ def validate_analysis_result(analysis_result):
 # ========================== 邮件检测 ==========================
 
 def detect_email(client, email_content):
-    """使用 LLM 检测电子邮件是否为钓鱼邮件"""
+    """使用 LLM 检测电子邮件是否为钓鱼邮件（防御方）"""
     prompt = detection_prompt.format(email_content=email_content)
-    response = get_LLM_response_vllm(client, prompt, function_name="email_detection")
+    response = get_LLM_response_vllm(client, prompt, function_name="email_detection", role="defense")
 
     print("detection response：",response)
     if "etermined as a phishing email" in response:
@@ -796,7 +970,7 @@ def lime_analyze_email(email_content, model_name="bert"):
         return create_fallback_analysis_result(cleaned_email)
 
 def generate_lime_adversarial_email(generation_client, email_content, lime_analysis):
-    """根据 LIME 分析结果生成对抗性钓鱼邮件"""
+    """根据 LIME 分析结果生成对抗性钓鱼邮件（攻击方）"""
     print("使用 LIME 分析结果生成对抗性钓鱼邮件...")
     
     # 获取记忆上下文
@@ -818,8 +992,8 @@ def generate_lime_adversarial_email(generation_client, email_content, lime_analy
 
     print("prompt:-------------------\n ", enhanced_prompt)
     
-    # 生成对抗性邮件
-    adversarial_email = get_LLM_response_vllm(generation_client, enhanced_prompt, function_name="lime_adversarial_generation")
+    # 生成对抗性邮件（攻击方）
+    adversarial_email = get_LLM_response_vllm(generation_client, enhanced_prompt, function_name="lime_adversarial_generation", role="attack")
     
     return adversarial_email
 
@@ -1251,42 +1425,83 @@ def adversarial_ml_model_evasion(generation_client, recheck_client, email_conten
 # ========================== 邮件评估 ==========================
 
 def evaluate_email(client, email_content):
-    """使用 LLM 评估电子邮件是否为钓鱼邮件"""
+    """使用 LLM 评估电子邮件是否为钓鱼邮件（防御方）"""
     prompt = evaluation_prompt.format(email_content=email_content)
-    response = get_LLM_response_vllm(client, prompt)
+    response = get_LLM_response_vllm(client, prompt, role="defense")
     return response
 
 def formatting_email(client, email_content):
-    """使用 LLM 格式化电子邮件"""
+    """使用 LLM 格式化电子邮件（攻击方）"""
     prompt = formatting_prompt.format(email_content=email_content)
-    response_str = get_LLM_response_vllm(client, prompt)
+    response_str = get_LLM_response_vllm(client, prompt, role="attack")
 
-    print("formatting response: ",response_str)
+    print("formatting response: ", response_str[:200] if response_str else "Empty response")
 
+    # 检查响应是否为空
+    if not response_str or response_str.strip() == "":
+        print("⚠️ 警告: LLM返回空响应，使用默认格式")
+        return create_default_formatted_email(email_content)
+    
+    # 查找JSON内容
     start_index = response_str.find('{')
     end_index = response_str.rfind('}') + 1
+    
+    # 检查是否找到JSON
+    if start_index == -1 or end_index <= start_index:
+        print("⚠️ 警告: 响应中未找到JSON格式，使用默认格式")
+        print(f"响应内容: {response_str[:500]}")
+        return create_default_formatted_email(email_content)
+    
     json_str = response_str[start_index:end_index]
+    
     try:
         # 将JSON字符串解析为Python字典
         response_dict = json.loads(json_str)
+        
+        # 验证必要字段
+        required_fields = ['has_url', 'has_attachment']
+        for field in required_fields:
+            if field not in response_dict:
+                print(f"⚠️ 警告: JSON缺少必要字段'{field}'，添加默认值")
+                response_dict[field] = "No"
+        
+        return response_dict
+        
     except json.JSONDecodeError as e:
-        print(f"Error parsing JSON: {e}")
-        return {}
-    return response_dict
+        print(f"⚠️ JSON解析错误: {e}")
+        print(f"尝试解析的JSON: {json_str[:200]}")
+        return create_default_formatted_email(email_content)
 
 
-def web_resource_email(client, email_content,url):
-    """使用 LLM 评估电子邮件是否为钓鱼邮件"""
-    prompt = web_generation_prompt.format(email_content=email_content,url=url)
-    response_str = get_LLM_response_vllm(client, prompt)
+def create_default_formatted_email(email_content):
+    """
+    当formatting失败时，创建默认的格式化结果
+    """
+    return {
+        "subject": "Important Notice",
+        "has_url": "No",
+        "url": "",
+        "has_attachment": "No",
+        "attchment": "",
+        "attchment_type": "",
+        "items": {
+            "Text": email_content
+        }
+    }
+
+
+def web_resource_email(client, email_content, url):
+    """使用 LLM 生成Web资源（攻击方）"""
+    prompt = web_generation_prompt.format(email_content=email_content, url=url)
+    response_str = get_LLM_response_vllm(client, prompt, role="attack")
 
     print("web_resource: ",response_str)
     return response_str
 
 def attachment_resource_email(client, email_content, attachment_name, attachment_type):
-    """使用 LLM 评估电子邮件是否为钓鱼邮件"""
+    """使用 LLM 生成附件资源（攻击方）"""
     prompt = attachment_generation_prompt.format(email_content=email_content, attachment_name=attachment_name, attachment_type=attachment_type)
-    response_str = get_LLM_response_vllm(client, prompt)
+    response_str = get_LLM_response_vllm(client, prompt, role="attack")
 
     print("attachment_resource: ",response_str)
     return response_str
@@ -1296,13 +1511,14 @@ def attachment_resource_email(client, email_content, attachment_name, attachment
 def generate_and_recheck(generation_client, recheck_client, email_content, detection_reason):
     """
     生成规避检测的新钓鱼邮件，并进行二次检测
-    :param client: OpenAI 客户端
+    :param generation_client: 攻击方客户端
+    :param recheck_client: 防御方客户端
     :param email_content: 原始邮件正文
     :param detection_reason: 之前的检测结果
     :return: 新生成的邮件, 二次检测结果
     """
     prompt = generation_prompt.format(detection_reason=detection_reason, email_content=email_content)
-    new_email = get_LLM_response_vllm(generation_client, prompt) #,"generation")
+    new_email = get_LLM_response_vllm(generation_client, prompt, role="attack")
     print("new_email",new_email)
     time.sleep(1)
     
@@ -1343,17 +1559,28 @@ def generate_and_recheck_iteratively(generation_client,recheck_client, email_con
     :param email_content: 原始邮件正文
     :param detection_reason: 之前的检测结果
     :param max_iterations: 最大迭代次数
-    :return: 生成的邮件, 最终检测结果, 迭代次数
+    :return: 生成的邮件, 最终检测结果, 迭代次数, 所有迭代的邮件历史
     """
     iteration = 0
     new_email = email_content
     final_prediction = 0
     recheck_result = ""
+    
+    # 🔧 修复: 保存每轮迭代的邮件
+    iteration_history = {}
 
     while iteration < max_iterations:
+        iteration += 1
         print(f"Iteration {iteration}: Generating a new phishing email...")
 
         new_email, final_prediction, detection_reason = generate_and_recheck(generation_client, recheck_client, new_email, detection_reason)
+        
+        # 🔧 修复: 记录这一轮的邮件
+        iteration_history[f"iteration_{iteration}"] = {
+            "email": new_email,
+            "prediction": final_prediction,
+            "detection_reason": detection_reason
+        }
 
         if final_prediction == 0:
             print(f"Success! The new phishing email successfully evaded detection after {iteration} iterations.")
@@ -1361,9 +1588,17 @@ def generate_and_recheck_iteratively(generation_client,recheck_client, email_con
         else:
             print(f"Failed to detect. Continuing iteration {iteration + 1}...")
 
-        iteration += 1
+    # 🔧 修复: 如果没有完成5轮，用最后一轮的邮件填充剩余轮次
+    if iteration < max_iterations:
+        for i in range(iteration + 1, max_iterations + 1):
+            iteration_history[f"iteration_{i}"] = {
+                "email": new_email,
+                "prediction": final_prediction,
+                "detection_reason": detection_reason,
+                "is_replicated": True  # 标记为复制的
+            }
 
-    return new_email, final_prediction, recheck_result, iteration
+    return new_email, final_prediction, recheck_result, iteration, iteration_history
 
 
 # ========================== 主执行逻辑 ==========================
@@ -1383,13 +1618,13 @@ def load_personal_info(data_path="./personal_info.json"):
         return []
 
 def generate_phishing_from_personal_info(client, personal_info, scenario="IT Security Alert"):
-    """基于个人信息和指定场景生成钓鱼邮件"""
+    """基于个人信息和指定场景生成钓鱼邮件（攻击方）"""
     prompt = init_prompt.format(
         personal_info=json.dumps(personal_info, ensure_ascii=False, indent=2),
         scenario=random.choice(list_of_scenarios)
     )
     
-    response = get_LLM_response_vllm(client, prompt)
+    response = get_LLM_response_vllm(client, prompt, role="attack")
     return response
 
 def generate_emails_from_personal_info(generate_client, personal_info_data, scenarios=None):
@@ -1459,14 +1694,23 @@ def main(data_source="email_data", personal_info_path=None, scenarios=None, enab
     # 创建输出目录
     output_dir = create_output_directory()
     
-    # 创建客户端
-    detection_client = create_client()
-    generate_client = create_client()
-    evaluation_client = create_client()
-    formatting_client = create_client()
-    web_resource_client = create_client()
-    attachment_resource_client = create_client()
-    lime_client = create_client()  # 添加LIME对抗专用客户端
+    # 创建客户端 - 攻防分离
+    print("\n" + "="*60)
+    print("初始化攻防客户端")
+    print("="*60)
+    
+    # 防御方客户端（用于检测和评估）
+    detection_client = create_client(role="defense")
+    evaluation_client = create_client(role="defense")
+    
+    # 攻击方客户端（用于生成钓鱼邮件）
+    generate_client = create_client(role="attack")
+    formatting_client = create_client(role="attack")
+    web_resource_client = create_client(role="attack")
+    attachment_resource_client = create_client(role="attack")
+    lime_client = create_client(role="attack")  # LIME对抗专用客户端（攻击方）
+    
+    print("="*60 + "\n")
 
     # 根据数据源类型加载或生成数据
     if data_source == "email_data":
@@ -1474,7 +1718,7 @@ def main(data_source="email_data", personal_info_path=None, scenarios=None, enab
         emails_data = load_email_data()
         
         # 按类型采样
-        samples_per_type = 1
+        samples_per_type = 10
         sampled_data = []
         emails_by_type = {}
         
@@ -1604,9 +1848,10 @@ def main(data_source="email_data", personal_info_path=None, scenarios=None, enab
                 time.sleep(2)
             
             # 大模型对抗攻击
+            llm_iteration_history = None
             if should_attack_with_llm:
                 print("启动大模型对抗攻击...")
-                generated_email, final_prediction, recheck_result, iterations = generate_and_recheck_iteratively(
+                generated_email, final_prediction, recheck_result, iterations, llm_iteration_history = generate_and_recheck_iteratively(
                     generate_client, detection_client, current_email, recheck_result
                 )
                 current_email = generated_email
@@ -1697,6 +1942,7 @@ def main(data_source="email_data", personal_info_path=None, scenarios=None, enab
             "llm_attack_enabled": enable_llm_attack,
             "lime_evasion_results": lime_evasion_results if enable_lime_attack and should_attack_with_lime else None,
             "all_generated_emails": all_generated_emails if enable_lime_attack and should_attack_with_lime else None,
+            "llm_iteration_history": llm_iteration_history if should_attack_with_llm else None,  # 🔧 修复: 保存LLM攻击的迭代历史
             "was_attacked": should_attack,
             "lime_attack_performed": should_attack_with_lime,
             "llm_attack_performed": should_attack_with_llm,
@@ -1740,6 +1986,65 @@ def main(data_source="email_data", personal_info_path=None, scenarios=None, enab
     with open(eval_file, 'w', encoding='utf-8') as f:
         json.dump(evaluation_data, f, ensure_ascii=False, indent=4, cls=NumpyEncoder)
     
+    # 计算并保存ASR及其他指标到单独的文件
+    metrics_summary = {
+        "initial_detection": {},
+        "iterations": [],
+        "by_type": {}
+    }
+    
+    if first_results:
+        initial_metrics = evaluate_metrics_macro(label_results, first_results)
+        initial_asr = calculate_asr(label_results, first_results)
+        metrics_summary["initial_detection"] = {
+            "accuracy": initial_metrics.get("Accuracy", 0),
+            "precision": initial_metrics.get("Precision", 0),
+            "recall": initial_metrics.get("Recall", 0),
+            "f1_score": initial_metrics.get("F1-score", 0),
+            "asr": initial_asr["ASR"],
+            "asr_percent": initial_asr["evasion_rate_percent"],
+            "successful_evasions": initial_asr["successful_evasions"],
+            "total_malicious": initial_asr["total_malicious"]
+        }
+    
+    if final_results:
+        final_results_transposed = list(zip(*final_results))
+        for i, item_result in enumerate(final_results_transposed):
+            iteration_metrics = evaluate_metrics_macro(label_results, list(item_result))
+            iteration_asr = calculate_asr(label_results, list(item_result))
+            metrics_summary["iterations"].append({
+                "iteration": i + 1,
+                "accuracy": iteration_metrics.get("Accuracy", 0),
+                "precision": iteration_metrics.get("Precision", 0),
+                "recall": iteration_metrics.get("Recall", 0),
+                "f1_score": iteration_metrics.get("F1-score", 0),
+                "asr": iteration_asr["ASR"],
+                "asr_percent": iteration_asr["evasion_rate_percent"],
+                "successful_evasions": iteration_asr["successful_evasions"],
+                "total_malicious": iteration_asr["total_malicious"]
+            })
+    
+    for email_type, results in type_results.items():
+        if results["first_predictions"]:
+            type_metrics = evaluate_metrics_macro(results["labels"], results["first_predictions"])
+            type_asr = calculate_asr(results["labels"], results["first_predictions"])
+            metrics_summary["by_type"][email_type] = {
+                "accuracy": type_metrics.get("Accuracy", 0),
+                "precision": type_metrics.get("Precision", 0),
+                "recall": type_metrics.get("Recall", 0),
+                "f1_score": type_metrics.get("F1-score", 0),
+                "asr": type_asr["ASR"],
+                "asr_percent": type_asr["evasion_rate_percent"],
+                "successful_evasions": type_asr["successful_evasions"],
+                "total_malicious": type_asr["total_malicious"]
+            }
+    
+    # 保存指标摘要
+    metrics_file = os.path.join(output_dir, 'metrics_summary.json')
+    with open(metrics_file, 'w', encoding='utf-8') as f:
+        json.dump(metrics_summary, f, ensure_ascii=False, indent=4, cls=NumpyEncoder)
+    print(f"指标摘要（包含ASR）已保存到: {metrics_file}")
+    
     # 保存所有生成的邮件历史到单独的文件 - 修复：包含所有样本
     all_email_histories = []
     for sample_data in data:
@@ -1761,13 +2066,47 @@ def main(data_source="email_data", personal_info_path=None, scenarios=None, enab
         # 如果有 LIME 生成的邮件历史，使用它；否则创建基础的邮件历史
         if sample_data.get("all_generated_emails"):
             email_history["generated_emails"] = sample_data["all_generated_emails"]
+        elif sample_data.get("llm_iteration_history"):
+            # 🔧 修复: 使用LLM攻击的迭代历史
+            llm_hist = sample_data["llm_iteration_history"]
+            original_email = sample_data.get("original_text", "")
+            
+            email_history["generated_emails"] = {
+                "original_email": original_email,
+                "models": {
+                    "llm_attack": {
+                        "iterations": {},
+                        "success_iteration": sample_data.get("iterations", 0),
+                        "final_email": sample_data.get("Text", original_email)
+                    }
+                }
+            }
+            
+            # 使用LLM攻击的实际迭代邮件
+            for iter_key, iter_data in llm_hist.items():
+                email_history["generated_emails"]["models"]["llm_attack"]["iterations"][iter_key] = {
+                    "email": iter_data.get("email", ""),
+                    "preprocessed_email": None,
+                    "input_email": iter_data.get("email", ""),
+                    "success": iter_data.get("prediction", 1) == 0,
+                    "preprocessing_used": False,
+                    "preprocessing_strategy": None,
+                    "preprocessing_threshold": None,
+                    "is_original": False,
+                    "is_replicated": iter_data.get("is_replicated", False),
+                    "confidence_before": 0.0,
+                    "confidence_after": 0.0,
+                    "label_before": "unknown",
+                    "label_after": "ham" if iter_data.get("prediction", 1) == 0 else "spam",
+                    "detection_reason": iter_data.get("detection_reason", "")
+                }
         else:
-            # 为没有进行LIME攻击的样本创建基础的邮件历史结构
+            # 为没有进行任何攻击的样本创建基础的邮件历史结构
             current_email = sample_data.get("Text", sample_data.get("original_text", ""))
             email_history["generated_emails"] = {
                 "original_email": sample_data.get("original_text", current_email),
                 "models": {
-                    "no_lime_attack": {
+                    "no_attack": {
                         "iterations": {},
                         "success_iteration": None,
                         "final_email": current_email
@@ -1775,13 +2114,13 @@ def main(data_source="email_data", personal_info_path=None, scenarios=None, enab
                 }
             }
             
-            # 为所有5轮迭代填充相同的邮件内容（因为没有进行LIME攻击）
+            # 为所有5轮迭代填充相同的邮件内容（因为没有进行攻击）
             for i in range(1, 6):
-                email_history["generated_emails"]["models"]["no_lime_attack"]["iterations"][f"iteration_{i}"] = {
+                email_history["generated_emails"]["models"]["no_attack"]["iterations"][f"iteration_{i}"] = {
                     "email": current_email,
                     "preprocessed_email": None,
                     "input_email": current_email,
-                    "success": sample_data.get("final_prediction", 0) == 0,  # 如果最终预测为0则为成功
+                    "success": sample_data.get("final_prediction", 0) == 0,
                     "preprocessing_used": False,
                     "preprocessing_strategy": None,
                     "preprocessing_threshold": None,
@@ -1793,7 +2132,7 @@ def main(data_source="email_data", personal_info_path=None, scenarios=None, enab
                     "label_after": "unknown"
                 }
             
-            email_history["generated_emails"]["models"]["no_lime_attack"]["final_email"] = current_email
+            email_history["generated_emails"]["models"]["no_attack"]["final_email"] = current_email
         
         all_email_histories.append(email_history)
     
@@ -1879,6 +2218,14 @@ def main(data_source="email_data", personal_info_path=None, scenarios=None, enab
     
     # 保存攻击配置信息
     attack_config = {
+        "attack_model": {
+            "model": config['attack_model']['model'],
+            "api_base_url": config['attack_model']['api_base_url']
+        },
+        "defense_model": {
+            "model": config['defense_model']['model'],
+            "api_base_url": config['defense_model']['api_base_url']
+        },
         "lime_attack_enabled": enable_lime_attack,
         "llm_attack_enabled": enable_llm_attack,
         "lime_models": lime_models if enable_lime_attack else None,
@@ -1894,23 +2241,63 @@ def main(data_source="email_data", personal_info_path=None, scenarios=None, enab
     print(f"All results saved to directory: {output_dir}")
 
     # 计算评估指标
+    print("\n" + "="*60)
+    print("评估指标结果")
+    print("="*60)
+    
     if first_results:
-        print("Initial Detection Metrics:", evaluate_metrics_macro(label_results, first_results))
+        print("\n初始检测指标 (Initial Detection Metrics):")
+        initial_metrics = evaluate_metrics_macro(label_results, first_results)
+        for metric, value in initial_metrics.items():
+            print(f"  {metric}: {value:.4f}")
+        
+        # 计算初始ASR
+        initial_asr = calculate_asr(label_results, first_results)
+        print(f"\n初始ASR (Attack Success Rate - 攻击成功率/漏报率):")
+        print(f"  ASR: {initial_asr['ASR']:.4f} ({initial_asr['evasion_rate_percent']:.2f}%)")
+        print(f"  成功绕过检测: {initial_asr['successful_evasions']} / {initial_asr['total_malicious']} 恶意样本")
     else:
         print("No valid initial detection results to evaluate.")
 
     if final_results:
         final_results_transposed = list(zip(*final_results))
         for i, item_result in enumerate(final_results_transposed):
-            print(f"Iteration {i + 1}: Final Detection Metrics: {evaluate_metrics_macro(label_results, list(item_result))}")
+            print(f"\n第 {i + 1} 轮迭代检测指标 (Iteration {i + 1}):")
+            iteration_metrics = evaluate_metrics_macro(label_results, list(item_result))
+            for metric, value in iteration_metrics.items():
+                print(f"  {metric}: {value:.4f}")
+            
+            # 计算该轮次的ASR
+            iteration_asr = calculate_asr(label_results, list(item_result))
+            print(f"  ASR (攻击成功率): {iteration_asr['ASR']:.4f} ({iteration_asr['evasion_rate_percent']:.2f}%)")
+            print(f"  成功绕过检测: {iteration_asr['successful_evasions']} / {iteration_asr['total_malicious']} 恶意样本")
     else:
         print("No valid final detection results to evaluate.")
 
+    print("\n" + "="*60)
+    print("按邮件类型分类的指标（所有轮次）")
+    print("="*60)
     for email_type, results in type_results.items():
-        if results["first_predictions"]:
-            print(f"Type '{email_type}' Initial Detection Metrics:", evaluate_metrics_macro(results["labels"], results["first_predictions"]))
+        if results["final_predictions"]:
+            print(f"\n类型 '{email_type}':")
+            
+            # 转置final_predictions，得到每一轮的预测结果
+            type_final_transposed = list(zip(*results["final_predictions"]))
+            
+            for i, iteration_preds in enumerate(type_final_transposed):
+                print(f"\n  第 {i + 1} 轮迭代检测指标 (Iteration {i + 1}):")
+                type_metrics = evaluate_metrics_macro(results["labels"], list(iteration_preds))
+                for metric, value in type_metrics.items():
+                    print(f"    {metric}: {value:.4f}")
+                
+                # 计算该类型该轮次的ASR
+                type_asr = calculate_asr(results["labels"], list(iteration_preds))
+                print(f"    ASR (攻击成功率): {type_asr['ASR']:.4f} ({type_asr['evasion_rate_percent']:.2f}%)")
+                print(f"    成功绕过检测: {type_asr['successful_evasions']} / {type_asr['total_malicious']} 恶意样本")
         else:
-            print(f"No valid initial detection results to evaluate for type '{email_type}'.")
+            print(f"No valid detection results to evaluate for type '{email_type}'.")
+    
+    print("="*60)
 
     # 计算并输出执行时间和token统计
     end_time = time.time()
@@ -2090,7 +2477,7 @@ Example format:
 {{"urgent": "important", "verify": "check", "account": "profile"}}"""
 
     try:
-        response = get_LLM_response_vllm(client, prompt)
+        response = get_LLM_response_vllm(client, prompt, role="attack")
         
         # 尝试解析JSON响应
         import json
