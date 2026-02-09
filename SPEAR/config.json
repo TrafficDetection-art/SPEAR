@@ -1,5 +1,14 @@
 {
-  "model": "your model_name",
-  "api_key": "your api_key",
-  "api_base_url": "your api_url"
+  "attack_model": {
+    "model": "gpt-4o",
+    "api_key": "【your api】",
+    "api_base_url": "【your url】",
+    "use_minimal_params": true
+    },
+    "defense_model": {
+      "model": "【your model】",
+      "api_key": "【your api】",
+      "api_base_url": "【your url】",
+      "use_minimal_params": true
+    }
 }
