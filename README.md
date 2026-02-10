@@ -95,6 +95,8 @@ python new_multi_agent_with_lime.py     --data_path ../dataset/test_data.json  -
 Apart from ./SPEAR/config.json, this project centralizes most paths and hyperparameters in `project_config.json`.
 - **Hyperparameters & module configs:** see **[CONFIG.md](CONFIG.md)**.
 
+Note: Due to platform size limits, `dataset/email_data.json` in this repository contains only a **small sample** of the dataset for format demonstration. To reproduce the full results, please obtain the **full public dataset** used in the paper and place it at the same path following the documented schema.
+
 
 ## 💡 Feature Highlights
 
