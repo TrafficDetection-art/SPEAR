@@ -1,3 +1,6 @@
+import sys; sys.path.insert(0, '..')
+from project_settings import get
+
 import joblib
 import pandas as pd
 import json
@@ -11,225 +14,234 @@ import eli5
 from eli5.lime import TextExplainer
 from eli5.lime.samplers import MaskingTextSampler
 
-# 1. 加载训练好的向量化器
-vectorizer_path = './models/vectorizer.joblib'
+# 1. Load trained vectorizer
+vectorizer_path = get("ml.vectorizer_file", "./models/vectorizer.joblib")
 vectorizer = joblib.load(vectorizer_path)
 
-# 2. 加载训练好的模型 - 这里主要使用LR模型，因为它更容易解释
-model_path = './models/LR.joblib'
+# 2. Load trained model - using LR model here as it is more interpretable
+fi_model_name = get("ml.feature_importance.model_name", "LR")
+model_path = os.path.join(get("ml.models_dir", "./models"), f"{fi_model_name}.joblib")
 model = joblib.load(model_path)
-print("成功加载LR模型")
+print(f"Successfully loaded {fi_model_name} model")
 
-# 3. 加载数据集
-data_path = '../../dataset/responds.json'
+# 3. Load dataset
+data_path = get("ml.feature_importance.data_path", "../../dataset/responds.json")
 dataset_filename = ntpath.basename(data_path)
 dataset_name = os.path.splitext(dataset_filename)[0]
-print(f"使用数据集: {dataset_name}")
+print(f"Using dataset: {dataset_name}")
 
 with open(data_path, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
-# 将 JSON 数据转换为 DataFrame
+# Convert JSON data to DataFrame
 test_df = pd.DataFrame(data)
 
-# 删除包含 NaN 的行
+# Remove rows containing NaN
 test_df = test_df.dropna(subset=['Text'])
 if 'Class' in test_df.columns:
     test_df = test_df.dropna(subset=['Class'])
 
-# 4. 获取特征名称（单词）
+# 4. Get feature names (words)
 feature_names = vectorizer.get_feature_names_out()
 
-# 5. 如果是LogisticRegression模型，可以直接获取特征权重
+# 5. For LogisticRegression model, feature weights can be obtained directly
 if isinstance(model, LogisticRegression):
-    # 获取系数（权重）
+    # Get coefficients (weights)
     coefficients = model.coef_[0]
     
-    # 创建特征名称和权重的DataFrame
+    # Create DataFrame of feature names and weights
     features_df = pd.DataFrame({
         'feature': feature_names,
         'coefficient': coefficients
     })
     
-    # 按照对类别1的贡献程度（正面影响）排序
+    # Sort by contribution to class 1 (positive impact)
     positive_features = features_df.sort_values('coefficient', ascending=False)
     
-    # 输出对预测为类别1贡献最大的前50个词
-    print("\n预测为类别1的最强正面影响词:")
-    print(positive_features.head(50).to_string(index=False))
+    # Output top N words contributing most to class 1 prediction
+    top_features_display = get("ml.feature_importance.top_features_display", 50)
+    print("\nStrongest positive influence words for class 1 prediction:")
+    print(positive_features.head(top_features_display).to_string(index=False))
     
-    # 按照对类别0的贡献程度（负面影响类别1）排序
+    # Sort by contribution to class 0 (negative impact on class 1)
     negative_features = features_df.sort_values('coefficient', ascending=True)
     
-    # 输出对预测为类别0（即不利于预测为类别1）贡献最大的前50个词
-    print("\n预测为类别0的最强词（不利于预测为类别1）:")
-    print(negative_features.head(50).to_string(index=False))
+    # Output top N words contributing most to class 0 (unfavorable for class 1)
+    print("\nStrongest words for class 0 prediction (unfavorable for class 1):")
+    print(negative_features.head(top_features_display).to_string(index=False))
     
-    # 可视化顶部词汇的贡献度
-    plt.figure(figsize=(12, 10))
+    # Visualize contribution of top words
+    fig_size = get("ml.feature_importance.figure_size", [12, 10])
+    plt.figure(figsize=tuple(fig_size))
     
-    # 选择最重要的正面和负面特征
-    top_positive = positive_features.head(20)
-    top_negative = negative_features.head(20)
+    # Select most important positive and negative features
+    n_plot = get("ml.feature_importance.top_features_plot", 20)
+    top_positive = positive_features.head(n_plot)
+    top_negative = negative_features.head(n_plot)
     
-    # 绘制正面特征
+    # Plot positive features
     plt.subplot(2, 1, 1)
     plt.barh(top_positive['feature'], top_positive['coefficient'], color='green')
-    plt.title('对预测为类别1贡献最大的词汇')
-    plt.xlabel('系数值（权重）')
+    plt.title('Words with Highest Contribution to Class 1 Prediction')
+    plt.xlabel('Coefficient Value (Weight)')
     plt.tight_layout()
     
-    # 绘制负面特征
+    # Plot negative features
     plt.subplot(2, 1, 2)
     plt.barh(top_negative['feature'], top_negative['coefficient'], color='red')
-    plt.title('对预测为类别0贡献最大的词汇')
-    plt.xlabel('系数值（权重）')
+    plt.title('Words with Highest Contribution to Class 0 Prediction')
+    plt.xlabel('Coefficient Value (Weight)')
     plt.tight_layout()
     
-    # 保存可视化结果
+    # Save visualization results
     os.makedirs('./results', exist_ok=True)
-    plt.savefig(f'./results/feature_importance_{dataset_name}.png', dpi=300, bbox_inches='tight')
-    print(f"\n特征重要性可视化已保存至: ./results/feature_importance_{dataset_name}.png")
+    plt.savefig(f'./results/feature_importance_{dataset_name}.png', dpi=get("ml.feature_importance.dpi", 300), bbox_inches='tight')
+    print(f"\nFeature importance visualization saved to: ./results/feature_importance_{dataset_name}.png")
     
-    # 保存特征重要性数据到CSV
+    # Save feature importance data to CSV
     features_df.to_csv(f'./results/feature_importance_{dataset_name}.csv', index=False)
-    print(f"特征重要性数据已保存至: ./results/feature_importance_{dataset_name}.csv")
+    print(f"Feature importance data saved to: ./results/feature_importance_{dataset_name}.csv")
 
-# 6. 为每个具体的文本解释预测结果
+# 6. Explain prediction results for each specific text
 def explain_prediction(text, true_class=None):
     """
-    解释模型对特定文本的预测
+    Explain model prediction for a specific text
     
-    参数:
-        text (str): 要解释的文本
-        true_class: 真实类别，如果已知
+    Args:
+        text (str): Text to explain
+        true_class: True class, if known
     """
-    # 向量化文本
+    # Vectorize text
     text_tfidf = vectorizer.transform([text])
     
-    # 进行预测
+    # Make prediction
     prediction = model.predict(text_tfidf)[0]
     
-    # 获取预测概率（如果模型支持）
+    # Get prediction probabilities (if model supports)
     if hasattr(model, 'predict_proba'):
         proba = model.predict_proba(text_tfidf)[0]
-        print(f"预测类别: {prediction}, 概率: 类别0={proba[0]:.4f}, 类别1={proba[1]:.4f}")
+        print(f"Predicted class: {prediction}, probability: class_0={proba[0]:.4f}, class_1={proba[1]:.4f}")
     else:
-        print(f"预测类别: {prediction}")
+        print(f"Predicted class: {prediction}")
     
     if true_class is not None:
-        print(f"真实类别: {true_class}")
+        print(f"True class: {true_class}")
     
-    # 只有针对LogisticRegression模型，我们可以直接使用eli5解释
+    # For LogisticRegression model, we can directly use eli5 for explanation
     if isinstance(model, LogisticRegression):
-        # 使用eli5解释特征贡献
+        # Use eli5 to explain feature contributions
         explanation = eli5.explain_prediction(model, text, vec=vectorizer, 
-                                              target_names=['类别0', '类别1'])
+                                              target_names=['class_0', 'class_1'])
         print(eli5.format_as_text(explanation))
     
     return prediction
 
-# 7. 分析被预测为类别1的样本，找出共同特征
+# 7. Analyze samples predicted as class 1, find common features
 def analyze_class_1_samples():
-    """分析所有被预测为类别1的样本，找出它们的共同特征"""
-    # 准备测试数据
+    """Analyze all samples predicted as class 1, find their common features"""
+    # Prepare test data
     X_test = test_df['Text']
     X_test_tfidf = vectorizer.transform(X_test)
     
-    # 进行预测
+    # Make prediction
     predictions = model.predict(X_test_tfidf)
     
-    # 获取预测为类别1的样本
+    # Get samples predicted as class 1
     class_1_indices = np.where(predictions == 1)[0]
     class_1_samples = test_df.iloc[class_1_indices]
     
-    print(f"\n总共有 {len(class_1_samples)} 个样本被预测为类别1")
+    print(f"\nTotal {len(class_1_samples)} samples predicted as class 1")
     
-    # 如果有真实标签，计算准确性
+    # If true labels exist, calculate accuracy
     if 'Class' in test_df.columns:
         true_positives = class_1_samples[class_1_samples['Class'] == 1]
         false_positives = class_1_samples[class_1_samples['Class'] == 0]
-        print(f"其中真正例（真实为1）: {len(true_positives)}")
-        print(f"假正例（真实为0）: {len(false_positives)}")
+        print(f"True positives (truly class 1): {len(true_positives)}")
+        print(f"False positives (truly class 0): {len(false_positives)}")
     
-    # 随机选择10个样本进行详细解释
-    if len(class_1_samples) > 10:
-        samples_to_explain = class_1_samples.sample(10)
+    # Randomly select samples for detailed explanation
+    num_samples = get("ml.feature_importance.num_samples_to_explain", 10)
+    if len(class_1_samples) > num_samples:
+        samples_to_explain = class_1_samples.sample(num_samples)
     else:
         samples_to_explain = class_1_samples
     
-    print("\n随机选择的被预测为类别1的样本解释:")
+    text_preview_length = get("ml.feature_importance.text_preview_length", 200)
+    print("\nExplanation of randomly selected samples predicted as class 1:")
     for idx, row in samples_to_explain.iterrows():
         print("\n" + "="*50)
-        print(f"样本ID: {idx}")
-        print(f"文本: {row['Text'][:200]}...")  # 只显示前200个字符
+        print(f"Sample ID: {idx}")
+        print(f"Text: {row['Text'][:text_preview_length]}...")  # Only show first N characters
         
-        # 解释预测
+        # Explain prediction
         true_class = row['Class'] if 'Class' in row else None
         explain_prediction(row['Text'], true_class)
     
     return class_1_samples
 
-# 8. 使用LIME解释复杂模型的预测结果
-def explain_with_lime(text, n_samples=5000):
+# 8. Use LIME to explain complex model predictions
+def explain_with_lime(text, n_samples=None):
     """
-    使用LIME解释模型对特定文本的预测
+    Use LIME to explain model prediction for a specific text
     
-    参数:
-        text (str): 要解释的文本
-        n_samples (int): LIME采样数量
+    Args:
+        text (str): Text to explain
+        n_samples (int): Number of LIME samples
     """
-    # 创建预测函数
+    if n_samples is None:
+        n_samples = get("ml.feature_importance.lime_n_samples", 5000)
+    
+    # Create prediction function
     def predict_proba(texts):
         vectorized_texts = vectorizer.transform(texts)
         return model.predict_proba(vectorized_texts)
     
-    # 初始化LIME文本解释器
+    # Initialize LIME text explainer
     sampler = MaskingTextSampler(
-        replacement="UNK",
-        max_replace=0.7,
-        min_replace=0,
-        token_pattern=r"(?u)\b\w\w+\b"
+        replacement=get("ml.feature_importance.lime_replacement", "UNK"),
+        max_replace=get("ml.feature_importance.lime_max_replace", 0.7),
+        min_replace=get("ml.feature_importance.lime_min_replace", 0),
+        token_pattern=get("ml.feature_importance.lime_token_pattern", r"(?u)\b\w\w+\b")
     )
     
     explainer = TextExplainer(
         sampler=sampler,
         n_samples=n_samples,
-        random_state=42
+        random_state=get("general.random_seed", 42)
     )
     
-    # 拟合解释器
+    # Fit explainer
     explainer.fit(text, predict_proba)
     
-    # 获取解释
-    explanation = explainer.explain_prediction(target_names=['类别0', '类别1'])
+    # Get explanation
+    explanation = explainer.explain_prediction(target_names=['class_0', 'class_1'])
     
-    # 显示解释结果
-    print("\nLIME解释:")
+    # Display explanation results
+    print("\nLIME explanation:")
     print(eli5.format_as_text(explanation))
     
     return explanation
 
-# 主要功能入口
+# Main entry point
 if __name__ == "__main__":
-    # 1. 分析全局特征重要性
-    print("\n全局特征重要性分析已完成")
+    # 1. Analyze global feature importance
+    print("\nGlobal feature importance analysis completed")
     
-    # 2. 分析被预测为类别1的样本
+    # 2. Analyze samples predicted as class 1
     class_1_samples = analyze_class_1_samples()
     
-    # 3. 如果用户想要解释特定文本，可以提供交互式界面
+    # 3. Interactive interface for explaining specific texts
     print("\n" + "="*50)
-    print("是否要解释特定文本? (y/n)")
+    print("Do you want to explain a specific text? (y/n)")
     choice = input().strip().lower()
     
     if choice == 'y':
-        print("请输入要解释的文本:")
+        print("Please enter the text to explain:")
         text = input()
         prediction = explain_prediction(text)
         
         if prediction == 1:
-            print("\n是否使用LIME进行更详细的解释? (y/n)")
+            print("\nUse LIME for more detailed explanation? (y/n)")
             lime_choice = input().strip().lower()
             if lime_choice == 'y':
-                explain_with_lime(text) 
+                explain_with_lime(text)
