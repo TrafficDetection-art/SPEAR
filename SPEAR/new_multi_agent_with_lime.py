@@ -39,6 +39,9 @@ from llm_client import create_client, get_LLM_response_vllm
 from email_ops import (
     detect_email,
     evaluate_email,
+    parse_evaluation_result,
+    check_quality_threshold,
+    polish_email_with_evaluation,
     formatting_email,
     web_resource_email,
     attachment_resource_email,
@@ -679,12 +682,64 @@ def main(data_source="email_data", data_path=None, personal_info_path=None,
                       f"result: {final_prediction}")
                 time.sleep(pget("spear.main.generation_delay_seconds", 2))
             
+            # ---- Quality Evaluation & Polish ----
             evaluate_result = evaluate_email(evaluation_client, current_email)
             print("evaluate_result:", evaluate_result)
+            
+            # Quality check and polish loop
+            quality_enabled = pget("spear.main.quality_evaluation.enabled", True)
+            max_polish_retries = pget("spear.main.quality_evaluation.max_polish_retries", 3)
+            polish_attempt = 0
+            quality_history = []
+            
+            if quality_enabled:
+                parsed_eval = parse_evaluation_result(evaluate_result)
+                quality_history.append({
+                    "attempt": polish_attempt,
+                    "evaluation": parsed_eval,
+                })
+                
+                passed, reason = check_quality_threshold(parsed_eval)
+                print(f"Quality check: {reason}")
+                
+                while not passed and polish_attempt < max_polish_retries:
+                    polish_attempt += 1
+                    print(f"\n--- Quality Polish Attempt {polish_attempt}/{max_polish_retries} ---")
+                    print(f"Reason: {reason}")
+                    
+                    # Polish the email
+                    polished_email = polish_email_with_evaluation(
+                        generate_client, current_email, parsed_eval
+                    )
+                    current_email = polished_email
+                    print(f"Email polished (attempt {polish_attempt})")
+                    time.sleep(pget("spear.main.generation_delay_seconds", 2))
+                    
+                    # Re-evaluate
+                    evaluate_result = evaluate_email(evaluation_client, current_email)
+                    print("Re-evaluation result:", evaluate_result)
+                    
+                    parsed_eval = parse_evaluation_result(evaluate_result)
+                    quality_history.append({
+                        "attempt": polish_attempt,
+                        "evaluation": parsed_eval,
+                    })
+                    
+                    passed, reason = check_quality_threshold(parsed_eval)
+                    print(f"Quality check: {reason}")
+                    
+                    if passed:
+                        print(f"✓ Quality threshold met after {polish_attempt} polish attempt(s)")
+                        break
+                
+                if not passed:
+                    print(f"⚠ Quality threshold not met after {max_polish_retries} polish attempts")
         else:
             print(f"\n=== Processing email {index + 1} (no attack needed) ===")
             print(f"Reason: label={label}, llm_prediction={llm_prediction}")
             final_prediction = llm_prediction
+            evaluate_result = None
+            quality_history = []
         
         # ---- Prediction list ----
         if enable_llm_attack and should_attack_with_llm:
@@ -771,6 +826,7 @@ def main(data_source="email_data", data_path=None, personal_info_path=None,
             ),
             "formatted_email_success": bool(formatted_email_dict),
             "evaluation_performed": evaluate_result is not None,
+            "quality_history": quality_history if 'quality_history' in locals() else [],
         }
         
         data.append(sample_data)
