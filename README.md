@@ -10,8 +10,7 @@
 
 > ⚠️ *This project is currently under peer review. Certain implementation details may be anonymized or withheld in accordance with double-blind submission guidelines.*
 >
-> ⚠️ *Ethical scope: All experiments are intended to be run in controlled, offline research environments. This repository does not provide deployment or delivery components for real-world attacks.*
-
+> ⚠️ *Ethical scope: The released artifacts are intended for research-only reproduction on public phishing datasets. They support text-only generation/rewriting and evaluation against detectors, while excluding operational components such as email delivery, automated sending, commercial gateway probing, and any target-specific profiling.
 ---
 
 
