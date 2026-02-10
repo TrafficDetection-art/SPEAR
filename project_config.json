@@ -114,7 +114,7 @@
 
     "spear": {
         "config_path": "./config.json",
-        "data_path": "./data/filtered_data.json",
+        "data_path": "./dataset/test_data.json",
         "personal_info_path": "./personal_info.json",
         "output_base_dir": "outputs",
 
