@@ -87,9 +87,10 @@ python new_multi_agent_with_lime.py     --data_path ../dataset/test_data.json  -
     "use_minimal_params": true
   }
 }
+```
 
 Apart from ./SPEAR/config.json, this project centralizes most paths and hyperparameters in `project_config.json`.
-- **Hyperparameters & module configs:** see **[docs/CONFIG.md](docs/CONFIG.md)**.
+- **Hyperparameters & module configs:** see **[CONFIG.md](CONFIG.md)**.
 
 
 ## 💡 Feature Highlights
