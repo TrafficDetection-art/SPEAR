@@ -1,0 +1,35 @@
+# Core dependencies
+torch>=2.0.0
+transformers>=4.30.0
+datasets>=2.12.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# LIME explainability
+lime>=0.2.0.1
+eli5>=0.13.0
+
+# API and networking
+openai>=1.0.0
+httpx>=0.24.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# NLP utilities
+nltk>=3.8.0
+
+# Visualization (optional, for ML feature importance)
+matplotlib>=3.7.0
+
+# Text processing utilities
+tldextract>=3.4.0
+
+# Deep learning utilities
+scipy>=1.10.0
+
+# Progress tracking (optional)
+tqdm>=4.65.0

@@ -1,0 +1,191 @@
+{
+    "_comment": "Central configuration for the SPEAR project. All hardcoded values are extracted here.",
+
+    "general": {
+        "device": "cuda:0",
+        "gpu_id": "0",
+        "random_seed": 42,
+        "proxy": {
+            "http": "",
+            "https": ""
+        }
+    },
+
+    "paths": {
+        "dataset_dir": "../dataset",
+        "dataset_file": "../dataset/email_data.json",
+        "train_data_file": "../dataset/train_data.json",
+        "test_data_file": "../dataset/test_data.json"
+    },
+
+    "dl": {
+        "models_dir": "./models",
+        "results_dir": "./results",
+        "tokenizer_name": "bert-base-uncased",
+        "model": {
+            "embed_size": 512,
+            "num_classes": 2,
+            "max_len": 512
+        },
+        "model_architectures": {
+            "cnn_lstm": {
+                "conv_out_channels": 128,
+                "conv_kernel_size": 5,
+                "conv_padding": 2,
+                "lstm_hidden_size": 128,
+                "dropout": 0.3
+            },
+            "textcnn": {
+                "num_filters": 128,
+                "kernel_sizes": [3, 4, 5],
+                "dropout": 0.5
+            },
+            "dnn": {
+                "hidden_sizes": [512, 256],
+                "dropout": 0.5
+            },
+            "deeplog": {
+                "hidden_size": 512,
+                "num_layers": 8
+            }
+        },
+        "training": {
+            "learning_rate": 2e-5,
+            "train_batch_size": 24,
+            "eval_batch_size": 64,
+            "num_epochs": 3,
+            "weight_decay": 0.001,
+            "test_split_ratio": 0.2,
+            "val_split_ratio": 0.1
+        },
+        "testing": {
+            "batch_size": 32,
+            "num_lime_features": 15,
+            "max_length": 512
+        },
+        "transformer_models": {
+            "bert": "bert-base-uncased",
+            "RoBERTa": "roberta-base",
+            "DistilBERT": "distilbert-base-uncased"
+        }
+    },
+
+    "ml": {
+        "models_dir": "./models",
+        "results_dir": "./results",
+        "vectorizer_file": "./models/vectorizer.joblib",
+        "training": {
+            "test_size": 0.2,
+            "random_state": 42,
+            "max_features": 5000
+        },
+        "model_names": ["LR", "RFC", "NB", "SVC"],
+        "model_params": {
+            "LR": {},
+            "RFC": {},
+            "NB": {},
+            "SVC": {"kernel": "linear"}
+        },
+        "process": {
+            "url_model_path": "./pickle/svc_model_url.pkl",
+            "body_vectorizer_path": "./model/vectorizer.joblib",
+            "body_model_path": "./pickle/lg_model_v1.pkl",
+            "input_data_dir": "./test_data/",
+            "output_dir": "./res",
+            "combination_weights": [0.4, 0.4],
+            "classification_threshold": 0.5
+        },
+        "feature_importance": {
+            "model_name": "LR",
+            "data_path": "../dataset/responds.json",
+            "top_features_display": 50,
+            "top_features_plot": 20,
+            "figure_size": [12, 10],
+            "dpi": 300,
+            "lime_n_samples": 5000,
+            "lime_replacement_token": "UNK",
+            "lime_max_replace": 0.7,
+            "lime_min_replace": 0,
+            "lime_token_pattern": "(?u)\\b\\w\\w+\\b",
+            "num_samples_to_explain": 10,
+            "text_preview_length": 200
+        }
+    },
+
+    "spear": {
+        "config_path": "./config.json",
+        "data_path": "./data/filtered_data.json",
+        "personal_info_path": "./personal_info.json",
+        "output_base_dir": "outputs",
+
+        "llm": {
+            "max_tokens": 2048,
+            "max_retries": 5,
+            "retry_delay": 2,
+            "sample_count": 3,
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "token_estimation_multiplier": 1.3
+        },
+
+        "lime": {
+            "default_models": ["textcnn", "bert"],
+            "score_threshold": 0.02,
+            "memory_top_k": 10,
+            "preprocessing_strategies": ["replace", "delete", "char_replace"],
+            "preprocessing_thresholds": [0.01, 0.02, 0.03]
+        },
+
+        "memory": {
+            "min_phishing_count": 2,
+            "min_legitimate_count": 2,
+            "similarity_threshold": 0.3,
+            "min_word_length": 3,
+            "similarity_weights": [0.4, 0.3, 0.3]
+        },
+
+        "smart_mapping": {
+            "update_interval_seconds": 300,
+            "top_phishing_words": 20,
+            "top_legitimate_words": 30,
+            "length_similarity_threshold": 2
+        },
+
+        "text_validation": {
+            "min_text_length": 5,
+            "max_special_char_ratio": 0.5,
+            "min_ascii_ratio": 0.3,
+            "min_word_count": 3,
+            "max_token_length": 512,
+            "chars_per_token": 4
+        },
+
+        "main": {
+            "samples_per_type": 10,
+            "max_iterations": 5,
+            "generation_delay_seconds": 2,
+            "scenarios": [
+                "IT Security Alert",
+                "HR Benefits Update",
+                "Financial Account Verification",
+                "Company Policy Update",
+                "System Maintenance Notification"
+            ]
+        },
+
+        "generate_llm": {
+            "emails_per_type": 5,
+            "api_delay_seconds": 1,
+            "email_types": [
+                "Account Information Update",
+                "Payment Issue Notification",
+                "Urgent Action Required",
+                "Reward/Prize Notification",
+                "IT Service Notification",
+                "Investment Opportunity",
+                "Social Media Alert",
+                "Identity Verification Request"
+            ]
+        }
+    }
+}
