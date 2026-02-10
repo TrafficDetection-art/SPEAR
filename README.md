@@ -15,10 +15,7 @@
 
 ## 💡 Feature Highlights
 
-- ✅ **One-Line Input to Full Attack**  
-  Given just a single input — a tuple of **{organization, name}** — SPEAR automatically performs profiling, custom email generation, adversarial refinement, and simulated delivery without human intervention.
-
-- 🎯 **Customization via LLM-Driven Profiling**  
+- 🎯 **Customization via LLM-Driven Profiling**  **(Not yet open-sourced)**
   The system uses search engine results and LLMs to dynamically construct rich **user profiles**, which guide the generation of **highly targeted** phishing emails.
 
 - 🤖 **Adversarial Phishing Generation (AI vs AI)**  
