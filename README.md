@@ -11,6 +11,10 @@
 > ⚠️ *This project is currently under peer review. Certain implementation details may be anonymized or withheld in accordance with double-blind submission guidelines.*
 >
 > ⚠️ *Ethical scope: The released artifacts are intended for research-only reproduction on public phishing datasets. They support text-only generation/rewriting and evaluation against detectors, while excluding operational components such as email delivery, automated sending, commercial gateway probing, and any target-specific profiling.
+>
+> **Access-controlled availability (withheld components).**  
+Certain components evaluated in the paper (e.g., personalized targeting pipelines and commercial gateway probing) are **withheld from public release** due to significant dual-use risk.  
+We may provide **access to qualified researchers under controlled conditions** (e.g., institutional affiliation, approved research purpose, and execution under a data/use agreement and access restrictions). Details and contact information will be provided in the camera-ready version (or upon request after publication).
 ---
 
 
