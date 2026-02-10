@@ -9,8 +9,87 @@
 **SPEAR** is a fully automated, modular system designed to simulate end-to-end spear-phishing attacks using large language models (LLMs). It integrates real-time profiling, personalized email generation, adversarial refinement, and multi-layered evaluation to highlight the escalating threat landscape of LLM-assisted phishing in adversarial contexts.
 
 > ⚠️ *This project is currently under peer review. Certain implementation details may be anonymized or withheld in accordance with double-blind submission guidelines.*
+>
+> ⚠️ *Ethical scope: All experiments are intended to be run in controlled, offline research environments. This repository does not provide deployment or delivery components for real-world attacks.*
 
 ---
+
+
+## Environment Setup
+
+### System Requirements
+	•	OS: Linux / macOS / Windows (Linux recommended)
+	•	Python: 3.10+ (recommended: 3.11)
+	•	Optional GPU: recommended for BERT/Transformer models (CPU-only is supported but slower)
+
+
+### Install Dependencies
+If you have a top-level requirements file:
+
+pip install -r requirements.txt
+
+Or if dependencies are split by modules (recommended for clarity):
+
+```
+pip install -r requirements.txt
+pip install -r SPEAR/requirements.txt
+```
+
+## Experimental Replication
+
+### Train Traditional ML Models
+```
+cd ML
+python train_body.py --data_path=../dataset/email_data.json
+```
+
+### Train Deep Learning Models (e.g., TextCNN / BERT)
+```
+cd DL
+python main.py --data_path=../dataset/email_data.json
+```
+
+### Attack/Refinement Against ML/DL/LLM Detectors
+
+*LIME attacks*
+```
+python new_multi_agent_with_lime.py     --data_path ../dataset/test_data.json     --lime_models textcnn bert     --max_iterations 5     --samples_per_type 100 --enable_lime_attack true
+```
+
+*LLM attacks*
+```
+python new_multi_agent_with_lime.py     --data_path ../dataset/test_data.json  --max_iterations 5     --samples_per_type 100 --enable_llm_attack true
+```
+
+### Tips
+
+> ⚠️ **LLM API Configuration Required**  
+> To run the LLM-dependent modules (e.g., controlled evaluation), you must configure your own LLM API credentials in `./SPEAR/config.json`.
+
+**Steps**
+1. Open `./SPEAR/config.json`
+2. Fill in `api_key` and `api_base_url` for the required models.
+3. **Do NOT commit** your API key to any public repository.
+
+**Example (`./SPEAR/config.json`)**
+```json
+{
+  "attack_model": {
+    "model": "gpt-4o",
+    "api_key": "YOUR_API_KEY",
+    "api_base_url": "YOUR_BASE_URL",
+    "use_minimal_params": true
+  },
+  "defense_model": {
+    "model": "YOUR_MODEL_NAME",
+    "api_key": "YOUR_API_KEY",
+    "api_base_url": "YOUR_BASE_URL",
+    "use_minimal_params": true
+  }
+}
+
+Apart from ./SPEAR/config.json, this project centralizes most paths and hyperparameters in `project_config.json`.
+- **Hyperparameters & module configs:** see **[docs/CONFIG.md](docs/CONFIG.md)**.
 
 
 ## 💡 Feature Highlights
