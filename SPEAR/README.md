@@ -44,12 +44,14 @@ To enable the adversarial module (LIME + LLM attacks), use the following:
 ⚠️ **Note**: For LIME attacks to work, corresponding deep learning models must be pre-trained.
 
 ```bash
-python new_multi_agent_with_lime.py \
-  --data_source personal_info \
-  --personal_info_path ./input.json \
-  --enable_llm_attack true \
-  --enable_lime_attack true
+python new_multi_agent_with_lime.py     --data_path ../dataset/test_data.json     --lime_models textcnn bert     --max_iterations 5     --samples_per_type 100 --enable_lime_attack true
 ```
+
+LLM attacks
+```bash
+python new_multi_agent_with_lime.py     --data_path ../dataset/test_data.json  --max_iterations 5     --samples_per_type 100 --enable_llm_attack true
+```
+
 
 ---
 

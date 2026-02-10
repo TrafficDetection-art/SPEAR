@@ -1,8 +1,8 @@
 title_extraction_prompt = """
-请用英文从以下钓鱼邮件中提取并总结出标题。标题应该简洁明了，能够准确表达邮件的主题和目的。
+Please extract and summarize a title from the following phishing email in English. The title should be concise and clearly express the subject and purpose of the email.
 
-邮件内容如下：
+The email content is as follows:
 {email_content}
 
-请提供提取的邮件标题，要求只输出英文标题，不需要输出其他内容。
+Please provide the extracted email title. Only output the English title, no other content is needed.
 """
