@@ -1,6 +1,10 @@
+import sys; sys.path.insert(0, '..')
+from project_settings import get
+
 import json
 from datasets import Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
 
 def json_to_string(data, indent=0):
     result = []
@@ -19,11 +23,18 @@ def json_to_string(data, indent=0):
         result.append(f'{indent_str}{data}')
     return '\n'.join(result)
 
-def tokenize_function(examples,max_length=512):
-    model_name = "distilbert-base-uncased-finetuned-sst-2-english"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+def tokenize_function(examples, max_length=None):
+    if max_length is None:
+        max_length = get("dl.model.max_len", 512)
+    tokenizer_name = get("dl.tokenizer_name", "bert-base-uncased")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     return tokenizer(examples['Text'], padding="max_length", truncation=True, max_length=max_length)
-def load_dataset(data_path, tokenizer, max_length=512):
+
+
+def load_dataset(data_path, tokenizer, max_length=None):
+    if max_length is None:
+        max_length = get("dl.model.max_len", 512)
     with open(data_path, "r") as f:
         json_data = json.load(f)
     
@@ -36,9 +47,8 @@ def load_dataset(data_path, tokenizer, max_length=512):
     formatted_data = {
         "Text": [str(item["Text"]) if isinstance(item["Text"], str) else "" for item in filtered_data],
         "label": [item["Class"] for item in filtered_data],
-        "type": [item.get("type", "unknown") for item in filtered_data],  # Use get with default value for 'type'
+        "type": [item.get("type", "unknown") for item in filtered_data],
     }
     dataset = Dataset.from_dict(formatted_data)
-
     tokenized_dataset = dataset.map(tokenize_function, batched=True)
     return tokenized_dataset
