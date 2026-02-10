@@ -45,6 +45,113 @@ def evaluate_email(client, email_content):
     return get_LLM_response_vllm(client, prompt, role="defense")
 
 
+def parse_evaluation_result(evaluation_response):
+    """
+    Parse evaluation response JSON and extract scores.
+    
+    Returns:
+        dict with keys: semantic_quality, authenticity, personalization, average_score, is_valid
+    """
+    try:
+        # Extract JSON from response
+        start_idx = evaluation_response.find('{')
+        end_idx = evaluation_response.rfind('}') + 1
+        
+        if start_idx == -1 or end_idx <= start_idx:
+            print("Warning: No valid JSON in evaluation response")
+            return {"is_valid": False, "average_score": 0.0}
+        
+        json_str = evaluation_response[start_idx:end_idx]
+        eval_data = json.loads(json_str)
+        
+        semantic = eval_data.get("Semantic Quality", {}).get("score", 0.0)
+        authenticity = eval_data.get("Authenticity", {}).get("score", 0.0)
+        personalization = eval_data.get("Personalization", {}).get("score", 0.0)
+        
+        avg = (semantic + authenticity + personalization) / 3.0
+        
+        return {
+            "is_valid": True,
+            "semantic_quality": semantic,
+            "authenticity": authenticity,
+            "personalization": personalization,
+            "average_score": avg,
+            "raw_response": evaluation_response,
+        }
+    except Exception as e:
+        print(f"Error parsing evaluation result: {e}")
+        return {"is_valid": False, "average_score": 0.0}
+
+
+def check_quality_threshold(parsed_eval, min_score=None, min_average=None):
+    """
+    Check if email quality meets threshold requirements.
+    
+    Returns:
+        (passed: bool, reason: str)
+    """
+    if not parsed_eval.get("is_valid"):
+        return False, "Evaluation result invalid"
+    
+    if min_score is None:
+        min_score = pget("spear.main.quality_evaluation.min_score_threshold", 6.0)
+    if min_average is None:
+        min_average = pget("spear.main.quality_evaluation.min_average_score", 7.0)
+    
+    semantic = parsed_eval["semantic_quality"]
+    authenticity = parsed_eval["authenticity"]
+    personalization = parsed_eval["personalization"]
+    avg = parsed_eval["average_score"]
+    
+    if avg < min_average:
+        return False, f"Average score too low: {avg:.2f} < {min_average}"
+    
+    if semantic < min_score:
+        return False, f"Semantic quality too low: {semantic:.2f} < {min_score}"
+    
+    if authenticity < min_score:
+        return False, f"Authenticity too low: {authenticity:.2f} < {min_score}"
+    
+    if personalization < min_score:
+        return False, f"Personalization too low: {personalization:.2f} < {min_score}"
+    
+    return True, f"Quality passed (avg: {avg:.2f})"
+
+
+def polish_email_with_evaluation(client, email_content, evaluation_feedback):
+    """
+    Polish email based on evaluation feedback.
+    
+    Args:
+        client: LLM client for generation
+        email_content: Current email content
+        evaluation_feedback: Parsed evaluation result with scores
+    
+    Returns:
+        str: Polished email content
+    """
+    prompt = f"""You are an expert email writer. The following email needs improvement based on quality evaluation:
+
+Original Email:
+{email_content}
+
+Evaluation Scores:
+- Semantic Quality: {evaluation_feedback.get('semantic_quality', 0)}/10
+- Authenticity: {evaluation_feedback.get('authenticity', 0)}/10  
+- Personalization: {evaluation_feedback.get('personalization', 0)}/10
+
+Instructions:
+1. Improve the email's fluency, grammar, and readability
+2. Make it sound more authentic and professional
+3. Add more personalized and specific details
+4. Maintain the core message and intent
+5. Ensure it reads like a legitimate business communication
+
+Please return ONLY the improved email content, without any explanations or markers."""
+
+    return get_LLM_response_vllm(client, prompt, role="attack")
+
+
 # ========================== Email Formatting ==========================
 
 def formatting_email(client, email_content):
