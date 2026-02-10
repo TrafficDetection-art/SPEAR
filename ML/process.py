@@ -1,3 +1,6 @@
+import sys; sys.path.insert(0, '..')
+from project_settings import get
+
 # -*- coding: utf-8 -*-
 
 import time
@@ -123,13 +126,13 @@ def detect_email_url(data_df):
                                                    ('domvec', vectorizer_transformer, ['domain_tokens']),
                                                    ('pathvec', vectorizer_transformer, ['path_tokens'])])
 
-    pickle_svc = './pickle/svc_model_url.pkl'
+    pickle_svc = get("ml.process.url_model_path", "./pickle/svc_model_url.pkl")
     svc_val = joblib.load(pickle_svc)
     res_url_df = results(url_data, svc_val)
     return res_url_df
 
 def detect_email_body(data_df):
-    loaded_vectorizer = joblib.load('./model/vectorizer.joblib')
+    loaded_vectorizer = joblib.load(get("ml.process.body_vectorizer_path", "./model/vectorizer.joblib"))
     t0 = time.perf_counter()
     val_X = loaded_vectorizer.transform(data_df['Text'])
     process_data_time = round(time.perf_counter() - t0, 3)
@@ -139,7 +142,7 @@ def detect_email_body(data_df):
     data_df.info()
     data_df.describe()
 
-    pickle_mlp = './pickle/lg_model_v1.pkl'
+    pickle_mlp = get("ml.process.body_model_path", "./pickle/lg_model_v1.pkl")
     t1 = time.perf_counter()
     mlp_test = joblib.load(pickle_mlp)
     preds = mlp_test.predict_proba(val_X)
@@ -148,15 +151,17 @@ def detect_email_body(data_df):
     print("lg time:", test_time)
     return pd.DataFrame(preds, columns=['body_n', 'body_p', 'body_s'])
 
-def combined_probabilities(row, weights=[0.4, 0.4]):
-    # 计算加权平均概率
+def combined_probabilities(row, weights=None):
+    if weights is None: weights = get("ml.process.combination_weights", [0.4, 0.4])
+    # Calculate weighted average probability
     combined_probs = (
         weights[0] * np.array([row[f'body_{i}'] if row['Text'] != 'NaN' else 0 for i in ['n','p','s']]) +
         weights[1] * np.array([row[f'url_{i}'] if row['url'] != 'NaN' else 0 for i in ['n','p','s']])
     )
     return combined_probs
 
-def classify_email(row, threshold=0.5):
+def classify_email(row, threshold=None):
+    if threshold is None: threshold = get("ml.process.classification_threshold", 0.5)
     probs = combined_probabilities(row)
     predicted_class = np.argmax(probs)
     return predicted_class
@@ -198,5 +203,5 @@ if __name__ == "__main__":
     # parser.add_argument('input_path', type=str, help='The input CSV file path')
     #
     # args = parser.parse_args()
-    input_path = './test_data/'
+    input_path = get("ml.process.input_data_dir", "./test_data/")
     main(input_path)
