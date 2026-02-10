@@ -143,6 +143,6 @@ This project is developed **solely for security research**, to demonstrate poten
 
 ## 📌 Notes for Reviewers
 
-- **Reproducibility:** All experiments are conducted in controlled environments, including evaluations against a variety of detectors and human annotators.
+- **Reproducibility:** All experiments are conducted in controlled environments, including evaluations against a variety of detectors.
 - **Ethical Disclosure:** This system is intended strictly for research and awareness under responsible disclosure and red-teaming frameworks.
 - **Blindness Compliance:** All identifying information (e.g., author names, institutions, repositories) has been redacted in accordance with double-blind review requirements.
