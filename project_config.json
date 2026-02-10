@@ -164,6 +164,12 @@
             "samples_per_type": 10,
             "max_iterations": 5,
             "generation_delay_seconds": 2,
+            "quality_evaluation": {
+                "enabled": true,
+                "min_score_threshold": 6.0,
+                "min_average_score": 7.0,
+                "max_polish_retries": 3
+            },
             "scenarios": [
                 "IT Security Alert",
                 "HR Benefits Update",
